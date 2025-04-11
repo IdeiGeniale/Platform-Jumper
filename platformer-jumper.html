@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Platform Jumper</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #222;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+            background-color: #87CEEB;
+        }
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            pointer-events: none;
+            z-index: 5;
+        }
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            background-color: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            pointer-events: auto;
+            user-select: none;
+        }
+        #leftBtn, #rightBtn {
+            margin-right: 10px;
+        }
+        #movement {
+            display: flex;
+        }
+        #gameOver, #levelComplete, #startScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #score, #level {
+            position: fixed;
+            top: 10px;
+            color: white;
+            font-size: 20px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            z-index: 5;
+        }
+        #score {
+            left: 10px;
+        }
+        #level {
+            right: 10px;
+        }
+        #startScreen h1 {
+            margin-bottom: 20px;
+        }
+        #startScreen p {
+            margin-bottom: 10px;
+            text-align: center;
+            max-width: 600px;
+            padding: 0 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="controls">
+        <div id="movement">
+            <div id="leftBtn" class="control-btn">←</div>
+            <div id="rightBtn" class="control-btn">→</div>
+        </div>
+        <div id="jumpBtn" class="control-btn">↑</div>
+    </div>
+    
+    <div id="score">Score: 0</div>
+    <div id="level">Level: 1</div>
+    
+    <div id="startScreen">
+        <h1>Platform Jumper</h1>
+        <p>Infinite randomly generated levels!</p>
+        <p>Collect coins and reach the flag to complete each level</p>
+        <p>Desktop: Arrow keys to move and jump</p>
+        <p>Mobile: Use on-screen buttons</p>
+        <button id="startBtn">Start Game</button>
+    </div>
+    
+    <div id="gameOver" style="display: none;">
+        <h1>Game Over!</h1>
+        <p id="finalScore">Score: 0</p>
+        <button id="restartBtn">Play Again</button>
+    </div>
+    
+    <div id="levelComplete" style="display: none;">
+        <h1>Level Complete!</h1>
+        <p id="levelScore">Score: 0</p>
+        <button id="nextLevelBtn">Next Level</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const levelElement = document.getElementById('level');
+        const gameOverScreen = document.getElementById('gameOver');
+        const finalScoreElement = document.getElementById('finalScore');
+        const restartBtn = document.getElementById('restartBtn');
+        const levelCompleteScreen = document.getElementById('levelComplete');
+        const levelScoreElement = document.getElementById('levelScore');
+        const nextLevelBtn = document.getElementById('nextLevelBtn');
+        const startScreen = document.getElementById('startScreen');
+        const startBtn = document.getElementById('startBtn');
+        
+        // Mobile controls
+        const leftBtn = document.getElementById('leftBtn');
+        const rightBtn = document.getElementById('rightBtn');
+        const jumpBtn = document.getElementById('jumpBtn');
+        
+        // Set canvas size to window size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Game state
+        let player = {
+            x: 50,
+            y: 0,
+            width: 30,
+            height: 40,
+            speedX: 0,
+            speedY: 0,
+            isJumping: false,
+            score: 0,
+            level: 1
+        };
+        
+        const gravity = 0.5;
+        const jumpPower = -13;
+        const moveSpeed = 5;
+        
+        let platforms = [];
+        let coins = [];
+        let flag = {};
+        let gameRunning = false;
+        
+        // Camera properties
+        let camera = {
+            x: 0,
+            y: 0,
+            width: canvas.width,
+            height: canvas.height
+        };
+        
+        // Level generation config
+        const levelConfig = {
+            minPlatformWidth: 80,
+            maxPlatformWidth: 200,
+            minPlatformHeight: 20,
+            maxPlatformHeight: 40,
+            minGapBetweenPlatforms: 60,
+            maxGapBetweenPlatforms: 150,
+            maxHeightDifference: 100,
+            minHeightDifference: -50,
+            coinProbability: 0.7,  // 70% chance of a coin on a platform
+            worldWidth: 2500
+        };
+        
+        // Controls state
+        const keys = {
+            left: false,
+            right: false,
+            up: false
+        };
+        
+        // Event Listeners for keyboard
+        window.addEventListener('keydown', function(e) {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            if (e.key === 'ArrowUp' && !player.isJumping) jump();
+        });
+        
+        window.addEventListener('keyup', function(e) {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+        });
+        
+        // Mobile touch controls
+        leftBtn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            keys.left = true;
+        });
+        
+        leftBtn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            keys.left = false;
+        });
+        
+        rightBtn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            keys.right = true;
+        });
+        
+        rightBtn.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            keys.right = false;
+        });
+        
+        jumpBtn.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (!player.isJumping) jump();
+        });
+        
+        // Mouse controls for easier testing
+        leftBtn.addEventListener('mousedown', function() { keys.left = true; });
+        leftBtn.addEventListener('mouseup', function() { keys.left = false; });
+        rightBtn.addEventListener('mousedown', function() { keys.right = true; });
+        rightBtn.addEventListener('mouseup', function() { keys.right = false; });
+        jumpBtn.addEventListener('mousedown', function() { 
+            if (!player.isJumping) jump();
+        });
+        
+        function jump() {
+            player.speedY = jumpPower;
+            player.isJumping = true;
+        }
+        
+        // Seeded random number generator for consistent level generation
+        let seed = Date.now();
+        function random() {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        }
+        
+        // Random integer between min and max (inclusive)
+        function randomInt(min, max) {
+            return Math.floor(min + random() * (max - min + 1));
+        }
+        
+        // Generate a platform configuration
+        function generatePlatform(x, previousY) {
+            const width = randomInt(levelConfig.minPlatformWidth, levelConfig.maxPlatformWidth);
+            const height = randomInt(levelConfig.minPlatformHeight, levelConfig.maxPlatformHeight);
+            
+            // Vary the height within reasonable bounds
+            let heightDifference = randomInt(levelConfig.minHeightDifference, levelConfig.maxHeightDifference);
+            let y = previousY + heightDifference;
+            
+            // Ensure platform isn't too high or too low
+            const maxY = canvas.height - 100;
+            const minY = canvas.height / 2;
+            y = Math.min(maxY, Math.max(minY, y));
+            
+            return {
+                x: x,
+                y: y,
+                width: width,
+                height: height
+            };
+        }
+        
+        // Generate a random level
+        function generateRandomLevel(levelNumber) {
+            // Create a new seed based on level number for consistent generation
+            seed = levelNumber * 9999;
+            
+            const platforms = [];
+            const coins = [];
+            
+            // Make the first platform longer and more stable
+            platforms.push({
+                x: 0,
+                y: canvas.height - 100,
+                width: 200,
+                height: 40
+            });
+            
+            let lastPlatformX = platforms[0].x + platforms[0].width;
+            let lastPlatformY = platforms[0].y;
+            
+            // Increase difficulty with level
+            const difficultyFactor = Math.min(1 + (levelNumber - 1) * 0.1, 2);
+            const numberOfPlatforms = 15 + Math.floor(levelNumber * 2);
+            
+            // Generate platforms
+            while (lastPlatformX < levelConfig.worldWidth - 300) {
+                const gap = randomInt(
+                    levelConfig.minGapBetweenPlatforms * difficultyFactor,
+                    levelConfig.maxGapBetweenPlatforms * difficultyFactor
+                );
+                
+                const platform = generatePlatform(lastPlatformX + gap, lastPlatformY);
+                platforms.push(platform);
+                
+                // Maybe place a coin on this platform
+                if (random() < levelConfig.coinProbability) {
+                    coins.push({
+                        x: platform.x + platform.width / 2,
+                        y: platform.y - 30,
+                        collected: false
+                    });
+                }
+                
+                lastPlatformX = platform.x + platform.width;
+                lastPlatformY = platform.y;
+            }
+            
+            // Add extra coins for higher levels
+            const extraCoins = Math.floor(levelNumber * 1.5);
+            for (let i = 0; i < extraCoins; i++) {
+                const randomPlatform = platforms[randomInt(1, platforms.length - 1)];
+                coins.push({
+                    x: randomPlatform.x + randomInt(20, randomPlatform.width - 20),
+                    y: randomPlatform.y - randomInt(30, 60),
+                    collected: false
+                });
+            }
+            
+            // Place the flag on the last platform
+            const lastPlatform = platforms[platforms.length - 1];
+            const flag = {
+                x: lastPlatform.x + lastPlatform.width - 50,
+                y: lastPlatform.y - 60
+            };
+            
+            return {
+                platforms: platforms,
+                coins: coins,
+                flag: flag
+            };
+        }
+        
+        // World size (used for camera boundaries)
+        const worldSize = {
+            width: levelConfig.worldWidth,
+            height: 1200
+        };
+        
+        // Load level
+        function loadLevel(levelNumber) {
+            // Reset player position
+            player.x = 50;
+            player.y = 0;
+            player.speedX = 0;
+            player.speedY = 0;
+            player.isJumping = false;
+            player.level = levelNumber;
+            
+            // Reset camera position
+            camera.x = 0;
+            camera.y = 0;
+            
+            // Generate the level
+            const generatedLevel = generateRandomLevel(levelNumber);
+            platforms = generatedLevel.platforms;
+            coins = generatedLevel.coins;
+            flag = generatedLevel.flag;
+            
+            // Update level display
+            levelElement.textContent = `Level: ${levelNumber}`;
+        }
+        
+        // Update camera position to follow player
+        function updateCamera() {
+            // Calculate desired camera position (center on player)
+            const targetX = player.x - canvas.width / 2 + player.width / 2;
+            const targetY = player.y - canvas.height / 2 + player.height / 2;
+            
+            // Smooth camera movement
+            camera.x += (targetX - camera.x) * 0.1;
+            camera.y += (targetY - camera.y) * 0.1;
+            
+            // Apply camera boundaries
+            camera.x = Math.max(0, Math.min(camera.x, worldSize.width - canvas.width));
+            camera.y = Math.max(0, Math.min(camera.y, worldSize.height - canvas.height));
+        }
+        
+        // Draw game elements with camera offset
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background with gradient
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, "#5D8CFA");
+            gradient.addColorStop(1, "#87CEEB");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw clouds (for background effect)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            for (let i = 0; i < 20; i++) {
+                drawCloud((i * 300) - camera.x * 0.3, 50 + (i % 5) * 40, 80 + (i % 3) * 20, 40 + (i % 3) * 10);
+            }
+            
+            // Draw distant mountains (parallax effect)
+            ctx.fillStyle = 'rgba(100, 100, 100, 0.5)';
+            for (let i = 0; i < 12; i++) {
+                drawMountain((i * 300) - camera.x * 0.1, canvas.height, 300 + (i % 3) * 50, 200 + (i % 4) * 50);
+            }
+            
+            // Draw platforms with camera offset
+            platforms.forEach(platform => {
+                // Draw platform body
+                const platformGradient = ctx.createLinearGradient(0, platform.y - camera.y, 0, platform.y - camera.y + platform.height);
+                platformGradient.addColorStop(0, "#8B4513");
+                platformGradient.addColorStop(1, "#5D3A1F");
+                ctx.fillStyle = platformGradient;
+                ctx.fillRect(platform.x - camera.x, platform.y - camera.y, platform.width, platform.height);
+                
+                // Add grass on top
+                ctx.fillStyle = '#7CFC00';
+                ctx.fillRect(platform.x - camera.x, platform.y - camera.y, platform.width, 5);
+                
+                // Add dirt texture
+                ctx.fillStyle = 'rgba(139, 69, 19, 0.5)';
+                for (let i = 0; i < platform.width / 10; i++) {
+                    const dotX = platform.x + i * 10 + randomInt(0, 5);
+                    const dotY = platform.y + randomInt(10, platform.height - 5);
+                    ctx.fillRect(dotX - camera.x, dotY - camera.y, 3, 3);
+                }
+            });
+            
+            // Draw coins with camera offset and animation
+            const time = Date.now() / 200;
+            coins.forEach((coin, index) => {
+                if (!coin.collected) {
+                    // Make coins float up and down slightly
+                    const floatOffset = Math.sin(time + index * 0.5) * 3;
+                    
+                    // Create gradient for coin
+                    const coinGradient = ctx.createRadialGradient(
+                        coin.x - camera.x, coin.y + floatOffset - camera.y, 0,
+                        coin.x - camera.x, coin.y + floatOffset - camera.y, 10
+                    );
+                    coinGradient.addColorStop(0, "#FFD700");
+                    coinGradient.addColorStop(1, "#FFA500");
+                    ctx.fillStyle = coinGradient;
+                    
+                    ctx.beginPath();
+                    ctx.arc(coin.x - camera.x, coin.y + floatOffset - camera.y, 10, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Add shine effect
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.beginPath();
+                    ctx.arc(coin.x - 3 - camera.x, coin.y + floatOffset - 3 - camera.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            
+            // Draw flag with camera offset
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(flag.x - camera.x, flag.y - camera.y, 10, 60);
+            
+            // Flag waving animation
+            const flagPoints = [];
+            const waveAmplitude = 4;
+            const waveFrequency = 0.1;
+            const flagWidth = 30;
+            const flagHeight = 20;
+            
+            for (let i = 0; i <= flagWidth; i++) {
+                const waveOffset = Math.sin((time + i * waveFrequency)) * waveAmplitude;
+                flagPoints.push({
+                    x: flag.x + 10 + i - camera.x,
+                    y: flag.y + waveOffset - camera.y
+                });
+            }
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.moveTo(flagPoints[0].x, flagPoints[0].y);
+            
+            for (let i = 1; i < flagPoints.length; i++) {
+                ctx.lineTo(flagPoints[i].x, flagPoints[i].y);
+            }
+            
+            for (let i = flagPoints.length - 1; i >= 0; i--) {
+                ctx.lineTo(flagPoints[i].x, flagPoints[i].y + flagHeight);
+            }
+            
+            ctx.closePath();
+            ctx.fill();
+            
+            // Draw player with camera offset
+            ctx.fillStyle = '#0000FF';
+            
+            // Draw player with slight animation based on movement
+            const playerBounce = player.isJumping ? 0 : Math.abs(Math.sin(Date.now() / 100) * 2);
+            const playerSquish = player.isJumping ? 0 : Math.abs(Math.sin(Date.now() / 100) * 2);
+            
+            // Draw player body with squish/stretch animation
+            ctx.fillRect(
+                player.x - camera.x, 
+                player.y - camera.y - playerBounce, 
+                player.width, 
+                player.height + playerBounce
+            );
+            
+            // Draw player face
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(player.x + 7 - camera.x, player.y + 10 - camera.y - playerBounce, 5, 5); // Left eye
+            ctx.fillRect(player.x + 18 - camera.x, player.y + 10 - camera.y - playerBounce, 5, 5); // Right eye
+            
+            // Different expression based on if jumping or moving
+            if (player.isJumping) {
+                // Surprised face when jumping
+                ctx.fillRect(player.x + 10 - camera.x, player.y + 22 - camera.y, 10, 10); // Open mouth
+                ctx.fillStyle = '#0000FF';
+                ctx.fillRect(player.x + 12 - camera.x, player.y + 24 - camera.y, 6, 6); // Inside mouth
+            } else if (player.speedX !== 0) {
+                // Happy face when moving
+                ctx.beginPath();
+                ctx.arc(player.x + 15 - camera.x, player.y + 25 - camera.y, 5, 0, Math.PI);
+                ctx.fill();
+            } else {
+                // Neutral face when standing
+                ctx.fillRect(player.x + 10 - camera.x, player.y + 25 - camera.y, 10, 3); // Mouth
+            }
+            
+            // Draw level number in a stylish way at the beginning of each level
+            if (gameRunning && Date.now() - levelStartTime < 3000) {
+                ctx.globalAlpha = Math.min(1, 3 - (Date.now() - levelStartTime) / 1000);
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Level ${player.level}`, canvas.width / 2, canvas.height / 2);
+                ctx.globalAlpha = 1;
+            }
+        }
+        
+        // Helper function to draw clouds
+        function drawCloud(x, y, width, height) {
+            ctx.beginPath();
+            ctx.arc(x, y, height/2, 0, Math.PI * 2);
+            ctx.arc(x + width/3, y - height/4, height/2, 0, Math.PI * 2);
+            ctx.arc(x + width/1.5, y, height/2, 0, Math.PI * 2);
+            ctx.arc(x + width/3, y + height/4, height/2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Helper function to draw mountains
+        function drawMountain(x, y, width, height) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + width/2, y - height);
+            ctx.lineTo(x + width, y);
+            ctx.fill();
+        }
+        
+        // Track when the level started for display animations
+        let levelStartTime = 0;
+        
+        // Update game state
+        function update() {
+            if (!gameRunning) return;
+            
+            // Player movement
+            if (keys.left) {
+                player.speedX = -moveSpeed;
+            } else if (keys.right) {
+                player.speedX = moveSpeed;
+            } else {
+                player.speedX = 0;
+            }
+            
+            // Apply gravity
+            player.speedY += gravity;
+            
+            // Update player position
+            player.x += player.speedX;
+            player.y += player.speedY;
+            
+            // World boundaries
+            if (player.x < 0) {
+                player.x = 0;
+            }
+            if (player.x + player.width > worldSize.width) {
+                player.x = worldSize.width - player.width;
+            }
+            
+            // Check for game over (falling off screen)
+            if (player.y > worldSize.height) {
+                gameOver();
+                return;
+            }
+            
+            // Platform collision
+            player.isJumping = true;
+            
+            platforms.forEach(platform => {
+                // Check if player is on platform
+                if (player.speedY >= 0 && 
+                    player.x + player.width > platform.x && 
+                    player.x < platform.x + platform.width &&
+                    player.y + player.height >= platform.y && 
+                    player.y + player.height <= platform.y + platform.height) {
+                    
+                    player.isJumping = false;
+                    player.speedY = 0;
+                    player.y = platform.y - player.height;
+                }
+            });
+            
+            // Coin collection
+            coins.forEach(coin => {
+                if (!coin.collected && 
+                    player.x + player.width > coin.x - 10 && 
+                    player.x < coin.x + 10 &&
+                    player.y + player.height > coin.y - 10 && 
+                    player.y < coin.y + 10) {
+                    
+                    coin.collected = true;
+                    player.score += 10;
+                    scoreElement.textContent = `Score: ${player.score}`;
+                    
+                    // Play coin sound (simple beep)
+                    const coinSound = new Audio();
+                    coinSound.src = "data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU";
+                    coinSound.play().catch(e => console.log("Audio play failed: ", e));
+                }
+            });
+            
+            // Flag (level complete)
+            if (player.x + player.width > flag.x && 
+                player.x < flag.x + 40 &&
+                player.y + player.height > flag.y && 
+                player.y < flag.y + 60) {
+                
+                levelComplete();
+                return;
+            }
+            
+            // Update camera position to follow player
+            updateCamera();
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            gameOverScreen.style.display = 'flex';
+            finalScoreElement.textContent = `Score: ${player.score}`;
+        }
+        
+        function levelComplete() {
+            gameRunning = false;
+            levelCompleteScreen.style.display = 'flex';
+            levelScoreElement.textContent = `Score: ${player.score}`;
+        }
+        
+        function startGame() {
+            player.score = 0;
+            player.level = 1;
+            scoreElement.textContent = `Score: 0`;
+            loadLevel(1);
+            levelStartTime = Date.now();
+            gameRunning = true;
+            startScreen.style.display = 'none';
+            gameLoop();
+        }
+        
+        function gameLoop() {
+            update();
+            draw();
+            
+            if (gameRunning) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        // Event listeners for buttons
+        startBtn.addEventListener('click', function() {
+            startGame();
+        });
+        
+        restartBtn.addEventListener('click', function() {
+            gameOverScreen.style.display = 'none';
+            startGame();
+        });
+        
+        nextLevelBtn.addEventListener('click', function() {
+            levelCompleteScreen.style.display = 'none';
+            loadLevel(player.level + 1);
+            levelStartTime = Date.now();
+            gameRunning = true;
+            gameLoop();
+        });
+        
+        // Initialize game (show start screen)
+        resizeCanvas();
+    </script>
+</body>
+</html>
